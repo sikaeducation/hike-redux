@@ -1,0 +1,6 @@
+#!/bin/bash
+
+git checkout main
+
+rm .hike-on &>/dev/null
+git add -A && git commit --amend --no-edit && git push -f

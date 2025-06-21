@@ -1,0 +1,40 @@
+#!/bin/bash
+
+clear_state() {
+  git checkout -q main
+  git update-ref -d refs/heads/group
+  git update-ref -d refs/heads/scout
+  git reflog expire --expire-unreachable=now --all &>/dev/null
+  git gc -q --prune=now
+
+  rm -rf .state &>/dev/null
+  rm .hike-on &>/dev/null
+}
+
+initialize() {
+  mkdir .state
+  echo "1" > .state/is-scouting
+  echo "0" > .state/error-count
+
+  touch .hike-on
+
+  git checkout -q -b group
+  git add .hike-on
+  git commit -q --allow-empty-message -m ""
+
+  git checkout -q -b scout
+  rm .hike-on
+  git add .hike-on
+  git commit -q --allow-empty-message -m ""
+
+  git switch -q group
+}
+
+clear_state
+initialize
+
+echo "*************"
+echo "HIKE REDUX"
+echo "*************"
+echo -e "\n"
+echo "You start the hike with the group at the base of the mountain. You're going to scout ahead while the group starts hiking. Switch to the 'scout' branch and run './next'."

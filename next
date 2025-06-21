@@ -1,0 +1,128 @@
+#!/bin/bash
+
+IS_SCOUTING=$(cat .state/is-scouting)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+ERROR_COUNT=$(cat .state/error-count)
+GROUP_PROGRESS=0
+SCOUT_PROGRESS=0
+
+report_error() {
+  echo "$1"
+  ((ERROR_COUNT+=1))
+  echo "${ERROR_COUNT}" > .state/error-count
+  exit 1
+}
+
+calculate_group_progress() {
+  for COMMIT_MESSAGE in $(git log --pretty=format:%B main..group); do
+    if [[ "${COMMIT_MESSAGE}" == 'Merge' ]]; then
+      report_error "Oops! You merged without rebasing. Use 'git reset --hard' to roll back the merge commit."
+    fi
+    if [[ -n "${COMMIT_MESSAGE}" ]]; then
+      GROUP_PROGRESS="$(($GROUP_PROGRESS$COMMIT_MESSAGE))"
+    fi
+  done
+}
+
+calculate_scout_progress() {
+  for COMMIT_MESSAGE in $(git log --pretty=format:%B group..scout); do
+    if [[ -n "${COMMIT_MESSAGE}" ]]; then
+      SCOUT_PROGRESS="$(($SCOUT_PROGRESS$COMMIT_MESSAGE))"
+    fi
+  done
+}
+
+scout_phase() {
+  if [[ "${CURRENT_BRANCH}" != "scout" ]]; then
+    report_error "Oops! You're not on the 'scout' branch. Use 'git switch' or 'git checkout' to change branches."
+  fi
+
+  rm .hike-on &>/dev/null
+  git add .hike-on &>/dev/null
+  git commit -q --allow-empty --allow-empty-message -m ""
+
+  GROUP_ROLL="$(( ${RANDOM} % 12 + 1 ))"
+  SCOUT_ROLL="$(( ${RANDOM} % 18 + 1 ))"
+  calculate_group_progress
+  calculate_scout_progress
+  
+  TOTAL_PROGRESS=$((GROUP_PROGRESS+SCOUT_PROGRESS+GROUP_ROLL+SCOUT_ROLL))
+
+  if [[ TOTAL_PROGRESS -ge 100 ]]; then
+    echo "You found the peak!"
+    echo "  * Figure out how to get back to the group by rebasing the 'scout' branch with the 'group' branch"
+    echo "  * Rejoin the group by switching to the 'group' branch"
+    echo "  * Show them the rest of your route by merging your updated 'scout' branch."
+    echo "When you're done, run './next' again."
+
+    git switch -q group
+    git commit -q --allow-empty -m "+$((GROUP_ROLL))"
+
+    git switch -q scout
+    git commit -q --allow-empty -m "+$((SCOUT_ROLL))"
+
+    echo "0" > .state/is-scouting
+
+    exit 0
+  fi
+
+  git switch -q group
+  git commit -q --allow-empty -m "+${GROUP_ROLL}"
+  
+  git switch -q scout
+  git commit -q --allow-empty -m "+${SCOUT_ROLL}"
+
+  NEW_SCOUT_PROGRESS=$((SCOUT_PROGRESS+SCOUT_ROLL))
+  if [[ NEW_SCOUT_PROGRESS -ge 20 ]]; then
+    echo "The group moved forward to position $((GROUP_PROGRESS+GROUP_ROLL)), while your scouting work has uncovered $((SCOUT_PROGRESS+SCOUT_ROLL)) positions worth of shortcuts."
+    echo "You've made a lot of progress!"
+    echo "  * Chart a way back to the group by rebasing the 'scout' branch with the 'group' branch"
+    echo "  * Rejoin the group by switching to the 'group' branch"
+    echo "  * Show the group your shortcuts by merging the updated 'scout' branch in"
+    echo "When you're done, run './next' again."
+    echo "0" > .state/is-scouting
+  else
+    echo "The group moved forward to position $((GROUP_PROGRESS+GROUP_ROLL)), while your scouting work so far has uncovered $((SCOUT_PROGRESS+SCOUT_ROLL)) positions worth of shortcuts. Run './next' to keep climbing."
+  fi
+}
+
+victory() {
+  echo "Victory! You successfully led the group to the peak of the mountain. You can use 'git rebase' and 'git merge' to split experiments off and merge them back."
+  exit 0
+}
+
+merge_phase() {
+  calculate_group_progress
+  calculate_scout_progress
+
+  if [[ "${CURRENT_BRANCH}" == "scout" ]] && [[ -n $(git log scout..group) ]]; then
+    report_error "Oops! You haven't found the path back to the group yet. Use 'git rebase' to include the commits from the 'group' branch that have been added since you last branched 'scout'."
+  fi
+  if [[ "${CURRENT_BRANCH}" == "group" ]] && [[ -n $(git cherry scout) ]]; then
+    report_error "Oops! You haven't found the path back to the group yet. Use 'git rebase' to include the commits from the 'group' branch that have been added since you last branched 'scout'."
+  fi
+  if [[ "${CURRENT_BRANCH}" != "group" ]]; then
+    report_error "Oops! You still need to rejoin the group. Use 'git switch' or 'git checkout' to switch to the 'group' branch."
+  fi
+  if [[ -n $(git log scout...group) ]]; then
+    report_error "Oops! You haven't told the group about your shortcut yet. Use 'git merge' to include your latest 'scout' commits."
+  fi
+
+  if [[ GROUP_PROGRESS -ge 100 ]]; then
+    victory
+  fi
+
+  echo "Because of your scouting work, the group has advanced to position $(($GROUP_PROGRESS+$SCOUT_PROGRESS))! Switch back to the 'scout' branch and run './next' again to keep climbing."
+
+  touch .hike-on
+  git add .hike-on
+  git commit -q --allow-empty --allow-empty-message -m ""
+
+  echo "1" > .state/is-scouting
+}
+
+if [[ IS_SCOUTING -eq 1 ]]; then
+  scout_phase
+else
+  merge_phase
+fi
